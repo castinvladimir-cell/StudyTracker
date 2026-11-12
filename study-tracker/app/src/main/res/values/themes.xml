@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="app_bg">#FF0A0A0B</color>
+    <color name="ic_launcher_background">#FF1A1A1D</color>
+
+    <style name="Theme.StudyTracker" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/app_bg</item>
+        <item name="android:colorBackground">@color/app_bg</item>
+    </style>
+</resources>
