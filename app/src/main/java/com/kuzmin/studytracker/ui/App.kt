@@ -1,6 +1,17 @@
 package com.kuzmin.studytracker.ui
 
+import android.net.Uri
+import android.os.Build
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.platform.LocalContext
+import com.kuzmin.studytracker.data.Backup
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -65,6 +76,80 @@ fun TrackerApp(store: Store) {
         }
     }
 
+    // ---------- копия данных ----------
+
+    val context = LocalContext.current
+    var pendingRestore by remember { mutableStateOf<Uri?>(null) }
+
+    fun say(message: String) {
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            snackbar.showSnackbar(message = message, duration = SnackbarDuration.Short)
+        }
+    }
+
+    fun restore(uri: Uri) {
+        scope.launch {
+            val list = withContext(Dispatchers.IO) { Backup.read(context, uri) }
+            if (list == null) {
+                say("Не получилось: это не файл копии")
+            } else {
+                selected = null
+                store.replaceAll(list)
+                say("Загружено предметов: ${list.size}")
+            }
+        }
+    }
+
+    val pickBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            if (store.subjects.isEmpty()) restore(uri) else pendingRestore = uri
+        }
+    }
+
+    val createBackup = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("application/zip")
+    ) { uri ->
+        if (uri != null) {
+            scope.launch {
+                val ok = withContext(Dispatchers.IO) { Backup.writeTo(context, uri, store.subjects) }
+                say(if (ok) "Копия сохранена" else "Не удалось сохранить копию")
+            }
+        }
+    }
+
+    fun backup() {
+        if (Build.VERSION.SDK_INT >= 29) {
+            scope.launch {
+                val name = withContext(Dispatchers.IO) { Backup.saveToDownloads(context, store.subjects) }
+                say(if (name != null) "Сохранено в Загрузки/StudyTracker" else "Не удалось сохранить копию")
+            }
+        } else {
+            createBackup.launch(Backup.fileName())
+        }
+    }
+
+    val restoreUri = pendingRestore
+    if (restoreUri != null) {
+        AlertDialog(
+            onDismissRequest = { pendingRestore = null },
+            containerColor = Palette.Sheet,
+            titleContentColor = Palette.Text,
+            textContentColor = Palette.TextDim,
+            title = { Text("Загрузить копию?") },
+            text = { Text("Все предметы и задания, которые есть сейчас, заменятся на те, что в файле.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    pendingRestore = null
+                    restore(restoreUri)
+                }) { Text("Заменить", color = Palette.Fill) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingRestore = null }) { Text("Отмена", color = Palette.Sub) }
+            },
+        )
+    }
+
     BackHandler(enabled = selected != null) { selected = null }
 
     Box(
@@ -73,15 +158,11 @@ fun TrackerApp(store: Store) {
             .background(Palette.Bg)
     ) {
         SharedTransitionLayout {
-            AnimatedContent(
-                targetState = selected,
-                transitionSpec = { fadeIn(tween(350)) togetherWith fadeOut(tween(350)) },
-                label = "screen",
-            ) { id ->
-                if (id == null) {
-                    HomeScreen(
+            // Главный экран всегда остаётся на месте, экран предмета открывается поверх него.
+            // Так при возврате ничего не строится заново и анимация стартует без паузы.
+            HomeScreen(
                         store = store,
-                        avScope = this@AnimatedContent,
+                        selectedId = selected,
                         tab = tab,
                         onTabChange = { tab = it },
                         listStates = listStates,
@@ -89,6 +170,8 @@ fun TrackerApp(store: Store) {
                         onScrolled = { scrollToId = null },
                         onOpen = { selected = it },
                         onAdd = { sheet = SheetRequest.New(tab) },
+                        onBackup = { backup() },
+                        onRestore = { pickBackup.launch(arrayOf("*/*")) },
                         onEdit = { sheet = SheetRequest.Edit(it) },
                         onMove = { subjectId ->
                             val s = store.subject(subjectId) ?: return@HomeScreen
@@ -102,10 +185,15 @@ fun TrackerApp(store: Store) {
                                 store.restoreSubject(removed.first, removed.second)
                             }
                         },
-                    )
-                } else {
-                    val subject = store.subject(id)
-                    if (subject != null) {
+            )
+            AnimatedContent(
+                targetState = selected,
+                transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(220)) },
+                label = "screen",
+            ) { id ->
+                Box(Modifier.fillMaxSize()) {
+                    val subject = id?.let { store.subject(it) }
+                    if (id != null && subject != null) {
                         DetailScreen(
                             subject = subject,
                             store = store,
@@ -117,7 +205,7 @@ fun TrackerApp(store: Store) {
                                 notify("Задание удалено") { store.restoreTask(id, removed.first, removed.second) }
                             },
                         )
-                    } else {
+                    } else if (id != null) {
                         LaunchedEffect(Unit) { selected = null }
                     }
                 }

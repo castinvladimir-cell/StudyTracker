@@ -25,7 +25,12 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.zIndex
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -65,6 +70,9 @@ import kotlin.math.roundToInt
 
 private val TaskShape = RoundedCornerShape(6.dp)
 
+/** Сколько элементов в списке стоит перед заданиями (шапка и подпись «Задания»). */
+private const val TASKS_OFFSET = 2
+
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 fun SharedTransitionScope.DetailScreen(
@@ -80,9 +88,19 @@ fun SharedTransitionScope.DetailScreen(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val navBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+    val haptic = LocalHapticFeedback.current
+    val reorder = rememberReorderState(
+        listState = listState,
+        onStart = {
+            openSwipe = null
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+        },
+        onMove = { from, to -> store.moveTask(subject.id, from - TASKS_OFFSET, to - TASKS_OFFSET) },
+    )
 
     Box(
         Modifier
+            .pointerInput(Unit) {} // не пропускать нажатия на главный экран под этим
             .sharedBounds(
                 rememberSharedContentState("card-${subject.id}"),
                 avScope,
@@ -116,7 +134,9 @@ fun SharedTransitionScope.DetailScreen(
 
             LazyColumn(
                 state = listState,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier
+                    .weight(1f)
+                    .reorderContainer(reorder),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 28.dp + navBottom),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
@@ -137,13 +157,27 @@ fun SharedTransitionScope.DetailScreen(
                         )
                     }
                 }
-                items(subject.tasks, key = { it.id }) { task ->
+                itemsIndexed(subject.tasks, key = { _, t -> t.id }) { i, task ->
+                    val lazyIndex = i + TASKS_OFFSET
+                    val itemModifier = when (lazyIndex) {
+                        reorder.draggingIndex -> Modifier
+                            .zIndex(1f)
+                            .graphicsLayer {
+                                translationY = reorder.draggingOffset
+                                scaleX = 1.03f
+                                scaleY = 1.03f
+                            }
+                        reorder.settlingIndex -> Modifier
+                            .zIndex(1f)
+                            .graphicsLayer { translationY = reorder.settleOffset.value }
+                        else -> Modifier.animateItem()
+                    }
                     SwipeReveal(
                         open = openSwipe == task.id,
                         onOpenChange = { isOpen ->
                             openSwipe = if (isOpen) task.id else if (openSwipe == task.id) null else openSwipe
                         },
-                        modifier = Modifier.animateItem(),
+                        modifier = itemModifier,
                         actions = {
                             SwipeAction("Изменить") {
                                 openSwipe = null
@@ -159,10 +193,18 @@ fun SharedTransitionScope.DetailScreen(
                         TaskCell(
                             task = task,
                             onToggle = {
-                                store.updateTask(subject.id, task.id) { it.copy(done = !it.done) }
+                                if (reorder.draggingIndex == null) {
+                                    store.updateTask(subject.id, task.id) { it.copy(done = !it.done) }
+                                }
                             },
                             onClick = {
-                                if (openSwipe != null) openSwipe = null else editingTask = task.id
+                                if (reorder.draggingIndex != null) {
+                                    // задание только что тащили, это не нажатие
+                                } else if (openSwipe != null) {
+                                    openSwipe = null
+                                } else {
+                                    editingTask = task.id
+                                }
                             },
                         )
                     }

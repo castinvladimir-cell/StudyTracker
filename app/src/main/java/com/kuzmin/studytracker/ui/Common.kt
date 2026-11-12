@@ -3,7 +3,7 @@ package com.kuzmin.studytracker.ui
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.BoundsTransform
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
@@ -53,7 +53,7 @@ const val DAY_MS = 86_400_000L
 
 /** Одинаковая плавная анимация для всех общих элементов при раскрытии карточки. */
 @OptIn(ExperimentalSharedTransitionApi::class)
-val CardBoundsTransform = BoundsTransform { _, _ -> tween(450, easing = FastOutSlowInEasing) }
+val CardBoundsTransform = BoundsTransform { _, _ -> tween(380, easing = CubicBezierEasing(0.2f, 0f, 0f, 1f)) }
 
 @Composable
 fun SubjectImage(path: String?, modifier: Modifier = Modifier) {

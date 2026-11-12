@@ -2,6 +2,7 @@ package com.kuzmin.studytracker.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -55,6 +56,8 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -93,7 +96,7 @@ private val CardShape = RoundedCornerShape(6.dp)
 @Composable
 fun SharedTransitionScope.HomeScreen(
     store: Store,
-    avScope: AnimatedVisibilityScope,
+    selectedId: Long?,
     tab: Int,
     onTabChange: (Int) -> Unit,
     listStates: List<LazyListState>,
@@ -101,6 +104,8 @@ fun SharedTransitionScope.HomeScreen(
     onScrolled: () -> Unit,
     onOpen: (Long) -> Unit,
     onAdd: () -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
     onEdit: (Long) -> Unit,
     onMove: (Long) -> Unit,
     onDelete: (Long) -> Unit,
@@ -132,6 +137,8 @@ fun SharedTransitionScope.HomeScreen(
                 sortMode = store.sortMode,
                 progressDescending = store.progressDescending,
                 onSort = store::selectSort,
+                onBackup = onBackup,
+                onRestore = onRestore,
             )
 
             AnimatedContent(
@@ -159,7 +166,7 @@ fun SharedTransitionScope.HomeScreen(
 
                 Crossfade(targetState = items.isEmpty(), label = "empty") { empty ->
                     if (empty) {
-                        EmptyState(t)
+                        EmptyState(t, showRestore = store.subjects.isEmpty(), onRestore = onRestore)
                     } else {
                         LazyColumn(
                             state = listState,
@@ -178,7 +185,9 @@ fun SharedTransitionScope.HomeScreen(
                                     onOpenChange = { isOpen ->
                                         openSwipe = if (isOpen) s.id else if (openSwipe == s.id) null else openSwipe
                                     },
-                                    modifier = Modifier.animateItem(),
+                                    modifier = Modifier
+                                        .animateItem()
+                                        .height(CardHeight),
                                     actions = {
                                         SwipeAction("Изменить") {
                                             openSwipe = null
@@ -196,13 +205,16 @@ fun SharedTransitionScope.HomeScreen(
                                         }
                                     },
                                 ) {
-                                    SubjectCard(
-                                        subject = s,
-                                        avScope = avScope,
-                                        onClick = {
-                                            if (openSwipe != null) openSwipe = null else onOpen(s.id)
-                                        },
-                                    )
+                                    // карточка открытого предмета скрыта: она «улетела» на весь экран
+                                    FadeSlot(visible = s.id != selectedId) {
+                                        SubjectCard(
+                                            subject = s,
+                                            avScope = this,
+                                            onClick = {
+                                                if (openSwipe != null) openSwipe = null else onOpen(s.id)
+                                            },
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -219,19 +231,14 @@ fun SharedTransitionScope.HomeScreen(
             animationSpec = spring(dampingRatio = 0.45f, stiffness = 600f),
             label = "fab",
         )
-        Box(
+        ScaleSlot(
+            visible = selectedId == null,
             modifier = Modifier
                 .align(Alignment.BottomEnd)
-                .padding(end = 20.dp, bottom = 20.dp + navBottom)
-                .renderInSharedTransitionScopeOverlay(zIndexInOverlay = 2f)
-                .then(
-                    with(avScope) {
-                        Modifier.animateEnterExit(
-                            enter = scaleIn(tween(300)) + fadeIn(tween(300)),
-                            exit = scaleOut(tween(220)) + fadeOut(tween(220)),
-                        )
-                    }
-                )
+                .padding(end = 20.dp, bottom = 20.dp + navBottom),
+        ) {
+        Box(
+            modifier = Modifier
                 .graphicsLayer {
                     scaleX = scale
                     scaleY = scale
@@ -256,7 +263,34 @@ fun SharedTransitionScope.HomeScreen(
                 modifier = Modifier.size(32.dp),
             )
         }
+        }
     }
+}
+
+/** Плавное появление и исчезновение содержимого без изменения размера места под него. */
+@Composable
+private fun FadeSlot(visible: Boolean, content: @Composable AnimatedVisibilityScope.() -> Unit) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(tween(180)),
+        exit = fadeOut(tween(180)),
+        content = content,
+    )
+}
+
+@Composable
+private fun ScaleSlot(
+    visible: Boolean,
+    modifier: Modifier = Modifier,
+    content: @Composable AnimatedVisibilityScope.() -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        modifier = modifier,
+        enter = scaleIn(tween(220)) + fadeIn(tween(220)),
+        exit = scaleOut(tween(160)) + fadeOut(tween(160)),
+        content = content,
+    )
 }
 
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -365,7 +399,10 @@ private fun TabsBar(
     sortMode: SortMode,
     progressDescending: Boolean,
     onSort: (SortMode) -> Unit,
+    onBackup: () -> Unit,
+    onRestore: () -> Unit,
 ) {
+    var dataMenu by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val bounds = remember { mutableStateListOf(0f to 0f, 0f to 0f) }
     val indicatorX by animateFloatAsState(
@@ -404,7 +441,7 @@ private fun TabsBar(
                                 bounds[i] = c.positionInParent().x to c.size.width.toFloat()
                             }
                             .clickable { onTabChange(i) }
-                            .padding(horizontal = 18.dp),
+                            .padding(horizontal = 14.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(label, color = color, fontSize = 17.sp, fontWeight = FontWeight.Medium)
@@ -432,9 +469,29 @@ private fun TabsBar(
             Box(
                 Modifier
                     .align(Alignment.CenterEnd)
-                    .padding(end = 6.dp)
+                    .padding(end = 2.dp)
             ) {
-                IconButton(onClick = { menu = true }) {
+                IconButton(onClick = { dataMenu = true }, modifier = Modifier.size(40.dp)) {
+                    Icon(Icons.Filled.MoreVert, contentDescription = "Копия данных", tint = Palette.TabIdle)
+                }
+                DropdownMenu(expanded = dataMenu, onDismissRequest = { dataMenu = false }) {
+                    DropdownMenuItem(
+                        text = { Text("Сохранить копию", color = Palette.Text, fontSize = 15.sp) },
+                        onClick = { dataMenu = false; onBackup() },
+                    )
+                    DropdownMenuItem(
+                        text = { Text("Загрузить копию", color = Palette.Text, fontSize = 15.sp) },
+                        onClick = { dataMenu = false; onRestore() },
+                    )
+                }
+            }
+
+            Box(
+                Modifier
+                    .align(Alignment.CenterEnd)
+                    .padding(end = 42.dp)
+            ) {
+                IconButton(onClick = { menu = true }, modifier = Modifier.size(40.dp)) {
                     SortIcon(Palette.TabIdle)
                 }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
@@ -477,7 +534,7 @@ private fun SortItem(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState(tab: Int) {
+private fun EmptyState(tab: Int, showRestore: Boolean, onRestore: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -503,5 +560,10 @@ private fun EmptyState(tab: Int) {
             textAlign = TextAlign.Center,
             modifier = Modifier.padding(top = 6.dp),
         )
+        if (showRestore) {
+            TextButton(onClick = onRestore, modifier = Modifier.padding(top = 10.dp)) {
+                Text("Загрузить копию", color = Palette.Fill, fontSize = 15.sp)
+            }
+        }
     }
 }

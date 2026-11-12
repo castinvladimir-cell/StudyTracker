@@ -14,8 +14,8 @@ android {
         applicationId = "com.kuzmin.studytracker"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        versionCode = 2
+        versionName = "1.1"
     }
 
     // Один и тот же ключ для всех сборок: приложение можно обновлять поверх, данные не теряются

@@ -111,6 +111,13 @@ class Store private constructor(context: Context) {
         commit(subjects.toMutableList().apply { add(index.coerceIn(0, size), subject) })
     }
 
+    /** Полная замена данных (восстановление из копии). */
+    fun replaceAll(list: List<Subject>) {
+        val maxId = list.flatMap { s -> listOf(s.id) + s.tasks.map { it.id } }.maxOrNull() ?: 0L
+        lastId = maxOf(lastId, maxId)
+        commit(list)
+    }
+
     // ---------- задания ----------
 
     fun addTask(subjectId: Long): Long {
@@ -124,6 +131,14 @@ class Store private constructor(context: Context) {
     fun updateTask(subjectId: Long, taskId: Long, transform: (StudyTask) -> StudyTask) {
         updateSubject(subjectId) { s ->
             s.copy(tasks = s.tasks.map { if (it.id == taskId) transform(it) else it })
+        }
+    }
+
+    /** Переставить задание внутри предмета (перетаскивание). */
+    fun moveTask(subjectId: Long, from: Int, to: Int) {
+        updateSubject(subjectId) { s ->
+            if (from == to || from !in s.tasks.indices || to !in s.tasks.indices) s
+            else s.copy(tasks = s.tasks.toMutableList().apply { add(to, removeAt(from)) })
         }
     }
 
